@@ -4,7 +4,7 @@ import pandas as pd
 # This class represents the results of a query of a DataSet and 
 # configuration to allow the display of the results.
 class DataSetResults:
-    def __init__( self, dataset, region_type, region_value, state=None ):
+    def __init__( self, dataset, region_type=None, region_value=None, state=None ):
 
         self.dataset = dataset
         self.region_type = region_type      # State, CD, Zip, Region
@@ -97,7 +97,7 @@ class DataSetResults:
             try:
                 d = data.groupby(pd.to_datetime(data[program.date_field], 
                         format=program.date_format, errors='coerce'))[[program.date_field]].count()
-                d = d.resample("Y").sum()
+                d = d.resample("YE").sum()
                 d.index = d.index.strftime('%Y')
                 d = d[ d.index > '2000' ]
     
