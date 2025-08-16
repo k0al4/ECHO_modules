@@ -471,7 +471,7 @@ def aggregate_by_facility(records, program, other_records = False):
     year = data["YEARQTR"].astype("str").str[0:4:1]
     data["YEARQTR"] = year
     data["sum"] = data["NUME90Q"] + data["NUMCVDT"] + data['NUMSVCD'] + data["NUMPSCH"]
-    data = data.groupby([records.dataset.idx_field, "FAC_NAME", "FAC_LAT", "FAC_LONG"]).sum()
+    data = data.groupby([records.dataset.idx_field, "FAC_NAME", "FAC_LAT", "FAC_LONG"])[["sum"]].sum()
     data = data.reset_index()
     data = data.loc[data["sum"] > 0] # only symbolize facilities with violations
     aggregator = "sum" # keep track of which field we use to aggregate data, which may differ from the preset
@@ -561,7 +561,7 @@ def aggregate_by_geography(dsr, agg_type, spatial_tables, region_filter=None):
 
     return results 
 
-def marker_text( row, no_text ):
+def marker_text( row, no_text, name_field, url_field ):
     '''
     Create a string with information about the facility or program instance.
 
@@ -581,26 +581,26 @@ def marker_text( row, no_text ):
     text = ""
     if ( no_text ):
         return text
-    if ( type( row['FAC_NAME'] == str )) :
+    if ( type( row[name_field] == str )) :
         try:
-            text = row["FAC_NAME"] + ' - '
+            text = row[name_field] + ' - '
         except TypeError:
             print( "A facility was found without a name. ")
         if 'DFR_URL' in row:
-            text += " - <p><a href='"+row["DFR_URL"]
+            text += " - <p><a href='"+row[url_field]
             text += "' target='_blank'>Link to ECHO detailed report</a></p>" 
     return text
 
 
-def check_bounds( row, bounds ):
+def check_bounds( row, bounds, lat_field='FAC_LAT', long_field='FAC_LONG' ):
     '''
-    See if the FAC_LAT and FAC_LONG of the row are interior to
+    See if the latitude and longitude of the row are interior to
     the minx, miny, maxx, maxy of the bounds.
 
     Parameters
     ----------
     row : Series
-	Must contain FAC_LAT and FAC_LONG
+	Must contain the lat_field and long_field
     bounds : Dataframe
 	Bounding rectangle--minx,miny,maxx,maxy
 
@@ -609,13 +609,14 @@ def check_bounds( row, bounds ):
     True if the row's point is in the bounds
     '''
 
-    if ( row['FAC_LONG'] < bounds.minx[0] or row['FAC_LAT'] < bounds.miny[0] \
-         or row['FAC_LONG'] > bounds.maxx[0] or row['FAC_LAT'] > bounds.maxy[0]):
+    if ( row[long_field] < bounds.minx[0] or row[lat_field] < bounds.miny[0] \
+         or row[long_field] > bounds.maxx[0] or row[lat_field] > bounds.maxy[0]):
         return False
     return True
 
 
-def mapper(df, bounds=None, no_text=False):
+def mapper(df, bounds=None, no_text=False, lat_field='FAC_LAT', long_field='FAC_LONG', 
+           name_field='FAC_NAME', url_field='DFR_URL'):
     '''
     Display a map of the Dataframe passed in.
     Based on https://medium.com/@bobhaffner/folium-markerclusters-and-fastmarkerclusters-1e03b01cb7b1
@@ -623,7 +624,7 @@ def mapper(df, bounds=None, no_text=False):
     Parameters
     ----------
     df : Dataframe
-        The facilities to map.  They must have a FAC_LAT and FAC_LONG field.
+        The facilities to map.  They must have latitude and longitude fields.
     bounds : Dataframe
         A bounding rectangle--minx, miny, maxx, maxy.  Discard points outside.
 
@@ -638,7 +639,10 @@ def mapper(df, bounds=None, no_text=False):
 
     # Initialize the map
     m = folium.Map(
-        location = [df.mean(numeric_only=True)["FAC_LAT"], df.mean(numeric_only=True)["FAC_LONG"]]
+        location = [df.mean(numeric_only=True)[lat_field], 
+                    df.mean(numeric_only=True)[long_field]],
+        min_zoom=2,
+        max_bounds=True
     )
 
     # Create the Marker Cluster array
@@ -648,11 +652,12 @@ def mapper(df, bounds=None, no_text=False):
     # Add a clickable marker for each facility
     for index, row in df.iterrows():
         if ( bounds is not None ):
-            if ( not check_bounds( row, bounds )):
+            if (not check_bounds( row, bounds, lat_field, long_field)):
                 continue
         mc.add_child(folium.CircleMarker(
-            location = [row["FAC_LAT"], row["FAC_LONG"]],
-            popup = marker_text( row, no_text ),
+            location = [row[lat_field], row[long_field]],
+            popup = marker_text(row, no_text, name_field, url_field),
+
             radius = 8,
             color = "black",
             weight = 1,
@@ -700,7 +705,8 @@ def point_mapper(df, aggcol, quartiles=False, other_fac=None):
   '''
   if ( df is not None ):
 
-    map_of_facilities = folium.Map()
+    map_of_facilities = folium.Map(min_zoom=2,
+                                   max_bounds=True)
    
     if quartiles == True:
       df['quantile'] = pd.qcut(df[aggcol], 4, labels=False, duplicates="drop")
@@ -764,7 +770,7 @@ def choropleth(polygons, attribute, key_id, attribute_table=None, legend_name=No
 
     import json
 
-    m = folium.Map()
+    m = folium.Map(max_bounds=True, min_zoom=2)
 
     polygons.reset_index(inplace=True) # Reset index
     polygons = polygons[~polygons.geometry.isna()] # Remove empty geographies we can't map   
@@ -798,7 +804,7 @@ def bivariate_map(regions, points, bounds=None, no_text=False, region_fields=Non
     bounds can be preset if necessary
     no_text errors can be managed
     '''
-    m = folium.Map()  
+    m = folium.Map(max_bounds=True, min_zoom=2)  
 
     region_popup = None
     if region_fields:
@@ -848,15 +854,15 @@ def bivariate_map(regions, points, bounds=None, no_text=False, region_fields=Non
     bounds = m.get_bounds()
     m.fit_bounds(bounds, padding=0)
 
-    # display the map!
-    display(m)
+    # return the map!
+    return m
 
 def show_regions(regions, states, region_type, spatial_tables):
     '''
     show the map of just the regions (e.g. zip codes) and the selected state(s)
     create the map using a library called Folium (https://github.com/python-visualization/folium)
     '''
-    m = folium.Map()  
+    m = folium.Map(max_bounds=True, min_zoom=2)  
 
     # Show the state(s)
     s = folium.GeoJson(
@@ -877,8 +883,8 @@ def show_regions(regions, states, region_type, spatial_tables):
     bounds = m.get_bounds()
     m.fit_bounds(bounds, padding=0)
 
-    # display the map!
-    display(m)
+    # return the map!
+    return m
     
 def dataset_filename(base, type, state, regions):
     '''
@@ -1161,8 +1167,13 @@ def polygon_map(center=(39.8282,-98.5796), zoom=5):
   ## Heavily inspired by #https://notebook.community/rjleveque/binder_experiments/misc/ipyleaflet_polygon_selector
   watercolor = basemap_to_tiles(basemaps.CartoDB.Positron)
   
-  m = Map(layers=(watercolor, ), center=center, zoom=zoom)
-  
+  m = Map(layers=(watercolor, ), 
+          center=center, 
+          zoom=zoom,
+          scroll_wheel_zoom=True,
+          min_zoom=2, 
+          max_bounds=True)
+
   global shapes
   shapes = set()
   
@@ -1177,5 +1188,4 @@ def polygon_map(center=(39.8282,-98.5796), zoom=5):
   }
   draw_control.on_draw(handle_draw)
   m.add_control(draw_control)
-  display(m)
-  return shapes
+  return (m, shapes)
